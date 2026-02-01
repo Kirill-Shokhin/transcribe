@@ -1,0 +1,15 @@
+**/__pycache__/
+.idea/
+/models/
+*.ipynb
+/CLAUDE.local.md
+GEMINI.md
+
+*.npz
+*.pt
+
+# SQLite files
+*.db
+*.db-shm
+*.db-wal
+nul
