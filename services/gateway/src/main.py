@@ -9,10 +9,19 @@ from pydantic import BaseModel
 import httpx
 from pathlib import Path
 
-ASR_URL = "http://asr-api:8001"
+# === Config ===
+ASR_URL = os.getenv("ASR_URL", "http://asr-api:8001")
 LLM_URL = os.getenv("LLM_URL", "http://llm:8080")
-IDLE_TIMEOUT = int(os.getenv("IDLE_TIMEOUT", "300"))  # 5 min default
+IDLE_TIMEOUT = int(os.getenv("IDLE_TIMEOUT", "120"))
 COMPOSE_PROJECT = os.getenv("COMPOSE_PROJECT_NAME", "transcribe")
+
+# LLM parameters
+LLM_TIMEOUT = int(os.getenv("LLM_TIMEOUT", "180"))
+LLM_MAX_TOKENS = int(os.getenv("LLM_MAX_TOKENS", "4000"))
+LLM_TEMPERATURE = float(os.getenv("LLM_TEMPERATURE", "0.3"))
+
+# ASR parameters
+ASR_TIMEOUT = int(os.getenv("ASR_TIMEOUT", "300"))  # upload timeout for large files
 
 # Track last activity for GPU services
 last_activity = {"asr-worker": 0, "llm": 0}
@@ -139,7 +148,7 @@ async def index():
 @app.post("/api/transcribe")
 async def transcribe(file: UploadFile = File(...)):
     await ensure_asr_worker()
-    async with httpx.AsyncClient(timeout=60) as client:
+    async with httpx.AsyncClient(timeout=ASR_TIMEOUT) as client:
         files = {"file": (file.filename, await file.read(), file.content_type)}
         resp = await client.post(f"{ASR_URL}/v1/transcribe", files=files)
         return resp.json()
@@ -150,6 +159,23 @@ async def list_jobs():
     async with httpx.AsyncClient(timeout=10) as client:
         resp = await client.get(f"{ASR_URL}/v1/jobs")
         return resp.json()
+
+
+@app.get("/api/jobs/stream")
+async def stream_jobs():
+    from starlette.responses import StreamingResponse
+
+    async def proxy_stream():
+        async with httpx.AsyncClient(timeout=None) as client:
+            async with client.stream("GET", f"{ASR_URL}/v1/jobs/stream") as resp:
+                async for chunk in resp.aiter_bytes():
+                    yield chunk
+
+    return StreamingResponse(
+        proxy_stream(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"}
+    )
 
 
 @app.get("/api/jobs/{job_id}")
@@ -171,11 +197,12 @@ async def delete_job(job_id: str):
 @app.post("/api/chat")
 async def chat(req: ChatRequest):
     await ensure_llm()
-    async with httpx.AsyncClient(timeout=120) as client:
+    async with httpx.AsyncClient(timeout=LLM_TIMEOUT) as client:
         payload = {
             "model": "local",
             "messages": req.messages,
-            "max_tokens": req.max_tokens
+            "max_tokens": req.max_tokens,
+            "temperature": LLM_TEMPERATURE
         }
         try:
             resp = await client.post(f"{LLM_URL}/v1/chat/completions", json=payload)
@@ -199,11 +226,12 @@ async def summarize(req: SummarizeRequest):
     prompt = req.prompt or default_prompt
     messages = [{"role": "user", "content": prompt + req.text}]
 
-    async with httpx.AsyncClient(timeout=120) as client:
+    async with httpx.AsyncClient(timeout=LLM_TIMEOUT) as client:
         payload = {
             "model": "local",
             "messages": messages,
-            "max_tokens": 2000
+            "max_tokens": LLM_MAX_TOKENS,
+            "temperature": LLM_TEMPERATURE
         }
         try:
             resp = await client.post(f"{LLM_URL}/v1/chat/completions", json=payload)

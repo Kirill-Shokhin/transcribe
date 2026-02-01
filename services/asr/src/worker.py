@@ -27,11 +27,22 @@ async def process_job(job_data: dict):
     audio_path = job_data["audio_path"]
     callback_url = job_data.get("callback_url")
 
-    await db.update_job(job_id, JobStatus.processing)
+    await db.update_job(job_id, JobStatus.processing, progress=0)
+
+    loop = asyncio.get_event_loop()
+    last_progress = [0]  # mutable container for closure
+
+    def on_progress(pct: int):
+        if pct > last_progress[0]:
+            last_progress[0] = pct
+            asyncio.run_coroutine_threadsafe(
+                db.update_job(job_id, JobStatus.processing, progress=pct),
+                loop
+            )
 
     try:
-        result = await asyncio.to_thread(asr_service.transcribe, audio_path)
-        await db.update_job(job_id, JobStatus.done, result=result.model_dump())
+        result = await asyncio.to_thread(asr_service.transcribe, audio_path, on_progress)
+        await db.update_job(job_id, JobStatus.done, result=result.model_dump(), progress=100)
         state = await db.get_job(job_id)
     except Exception as e:
         await db.update_job(job_id, JobStatus.error, error=str(e))

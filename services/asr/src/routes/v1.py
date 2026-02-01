@@ -1,7 +1,9 @@
 import json
 import uuid
+import asyncio
 import aiofiles
 from fastapi import APIRouter, UploadFile, File, HTTPException
+from fastapi.responses import StreamingResponse
 from redis import asyncio as aioredis
 
 from ..config import settings
@@ -47,6 +49,33 @@ async def transcribe(
 @router.get("/jobs", response_model=list[JobState])
 async def list_jobs():
     return await db.get_all_jobs()
+
+
+@router.get("/jobs/stream")
+async def stream_jobs():
+    """SSE endpoint for job updates"""
+    async def event_generator():
+        last_states = {}
+        while True:
+            all_jobs = await db.get_all_jobs()
+            updates = []
+            for job in all_jobs:
+                key = job.job_id
+                state = (job.status, job.progress)
+                if last_states.get(key) != state:
+                    last_states[key] = state
+                    updates.append(job.model_dump())
+
+            if updates:
+                yield f"data: {json.dumps(updates)}\n\n"
+
+            await asyncio.sleep(0.5)
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"}
+    )
 
 
 @router.get("/jobs/{job_id}", response_model=JobState)

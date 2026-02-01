@@ -4,14 +4,21 @@
 *.ipynb
 /CLAUDE.local.md
 GEMINI.md
+nul
 
 *.npz
 *.pt
 *.wav
 *.ogg
+*.mp3
+*.m4a
 
 # SQLite files
 *.db
 *.db-shm
 *.db-wal
-nul
+
+# Env files
+.env
+.env.*
+!.env.example

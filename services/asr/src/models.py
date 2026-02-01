@@ -32,6 +32,7 @@ class JobCreate(BaseModel):
 class JobState(BaseModel):
     job_id: str
     status: JobStatus
+    progress: int = 0
     result: TranscribeResult | None = None
     error: str | None = None
     filename: str | None = None

@@ -13,6 +13,7 @@ async def init_db():
                 job_id TEXT PRIMARY KEY,
                 filename TEXT,
                 status TEXT DEFAULT 'pending',
+                progress INTEGER DEFAULT 0,
                 result TEXT,
                 error TEXT,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -32,13 +33,20 @@ async def create_job(job_id: str, filename: str) -> JobState:
     return JobState(job_id=job_id, status=JobStatus.pending)
 
 
-async def update_job(job_id: str, status: JobStatus, result: dict | None = None, error: str | None = None):
+async def update_job(job_id: str, status: JobStatus, result: dict | None = None, error: str | None = None, progress: int | None = None):
     async with aiosqlite.connect(settings.db_path) as db:
-        await db.execute(
-            """UPDATE jobs SET status = ?, result = ?, error = ?, updated_at = CURRENT_TIMESTAMP
-               WHERE job_id = ?""",
-            (status.value, json.dumps(result) if result else None, error, job_id)
-        )
+        if progress is not None:
+            await db.execute(
+                """UPDATE jobs SET status = ?, progress = ?, result = ?, error = ?, updated_at = CURRENT_TIMESTAMP
+                   WHERE job_id = ?""",
+                (status.value, progress, json.dumps(result) if result else None, error, job_id)
+            )
+        else:
+            await db.execute(
+                """UPDATE jobs SET status = ?, result = ?, error = ?, updated_at = CURRENT_TIMESTAMP
+                   WHERE job_id = ?""",
+                (status.value, json.dumps(result) if result else None, error, job_id)
+            )
         await db.commit()
 
 
@@ -70,6 +78,7 @@ def _row_to_job(row) -> JobState:
     return JobState(
         job_id=row["job_id"],
         status=JobStatus(row["status"]),
+        progress=row["progress"] or 0,
         result=json.loads(row["result"]) if row["result"] else None,
         error=row["error"],
         filename=row["filename"]

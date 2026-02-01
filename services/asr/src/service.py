@@ -54,7 +54,7 @@ class ASRService:
         encoded, encoded_len = self.asr_model.forward(wav, length)
         return self.asr_model.decoding.decode(self.asr_model.head, encoded, encoded_len)[0]
 
-    def transcribe(self, audio_path: str | Path) -> TranscribeResult:
+    def transcribe(self, audio_path: str | Path, on_progress=None) -> TranscribeResult:
         audio_path = Path(audio_path)
         sr = settings.sample_rate
 
@@ -67,7 +67,11 @@ class ASRService:
 
         # Short audio — no segmentation
         if duration <= settings.short_audio_threshold:
+            if on_progress:
+                on_progress(50)
             text = self._transcribe_tensor(wav)
+            if on_progress:
+                on_progress(100)
             return TranscribeResult(
                 text=text,
                 segments=[Segment(start=0.0, end=duration, text=text)],
@@ -87,11 +91,12 @@ class ASRService:
             return TranscribeResult(text="", segments=[], duration=duration)
 
         chunks = self._merge_segments(timestamps, sr)
+        total_chunks = len(chunks)
 
         segments = []
         texts = []
 
-        for start, end in chunks:
+        for i, (start, end) in enumerate(chunks):
             audio_chunk = wav[start:end]
             text = self._transcribe_tensor(audio_chunk)
 
@@ -101,6 +106,9 @@ class ASRService:
                 text=text
             ))
             texts.append(text)
+
+            if on_progress:
+                on_progress(int((i + 1) / total_chunks * 100))
 
         return TranscribeResult(
             text=" ".join(texts),
