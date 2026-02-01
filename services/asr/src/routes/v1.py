@@ -7,7 +7,6 @@ from redis import asyncio as aioredis
 
 from ..config import settings
 from ..models import TranscribeRequest, JobCreate, JobState, JobStatus
-from ..service import asr_service
 
 
 router = APIRouter(prefix="/v1", tags=["v1"])

@@ -4,8 +4,34 @@ services:
     profiles: [full]
     ports:
       - "8000:8000"
+    environment:
+      - LLM_URL=http://llm:8080
     depends_on:
       - asr-api
+    restart: unless-stopped
+
+  llm:
+    image: ghcr.io/ggml-org/llama.cpp:server-cuda
+    profiles: [llm, full]
+    ports:
+      - "8002:8080"
+    volumes:
+      - llm_models:/root/.cache/llama.cpp
+    command: >
+      --hf-repo bartowski/Qwen_Qwen3-4B-Instruct-2507-GGUF
+      --hf-file Qwen_Qwen3-4B-Instruct-2507-Q4_K_M.gguf
+      --host 0.0.0.0
+      --port 8080
+      --n-gpu-layers 999
+      --ctx-size 8192
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    restart: unless-stopped
 
   redis:
     image: redis
@@ -18,9 +44,12 @@ services:
       interval: 5s
       timeout: 3s
       retries: 3
+    restart: unless-stopped
 
   asr-api:
-    build: ./services/asr
+    build:
+      context: ./services/asr
+      dockerfile: Dockerfile.api
     profiles: [asr, full]
     ports:
       - "8001:8001"
@@ -31,6 +60,7 @@ services:
     depends_on:
       redis:
         condition: service_healthy
+    restart: unless-stopped
 
   asr-worker:
     build: ./services/asr
@@ -51,8 +81,10 @@ services:
     depends_on:
       redis:
         condition: service_healthy
+    restart: unless-stopped
 
 volumes:
   redis_data:
   gigaam_models:
   asr_uploads:
+  llm_models:

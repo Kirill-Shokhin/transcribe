@@ -13,7 +13,7 @@
             min-height: 100vh;
             padding: 2rem;
         }
-        .container { max-width: 800px; margin: 0 auto; }
+        .container { max-width: 900px; margin: 0 auto; }
         h1 { margin-bottom: 2rem; font-weight: 300; }
 
         .drop-zone {
@@ -29,10 +29,7 @@
             border-color: #6c63ff;
             background: rgba(108, 99, 255, 0.1);
         }
-        .drop-zone.uploading {
-            opacity: 0.5;
-            pointer-events: none;
-        }
+        .drop-zone.uploading { opacity: 0.5; pointer-events: none; }
         .drop-zone input { display: none; }
 
         .tabs {
@@ -50,7 +47,7 @@
         }
         .tab.active { background: #6c63ff; color: #fff; }
 
-        .results { margin-top: 2rem; }
+        .results { margin-top: 1rem; }
         .job {
             background: #252540;
             border-radius: 8px;
@@ -60,10 +57,12 @@
         .job-header {
             display: flex;
             justify-content: space-between;
+            align-items: center;
             margin-bottom: 0.5rem;
             font-size: 0.85rem;
             color: #888;
         }
+        .job-actions { display: flex; gap: 0.5rem; }
         .job-status {
             padding: 0.2rem 0.5rem;
             border-radius: 4px;
@@ -74,20 +73,66 @@
         .job-status.done { background: #10b981; color: #000; }
         .job-status.error { background: #ef4444; }
 
-        .job-text {
-            line-height: 1.6;
-            white-space: pre-wrap;
-        }
-        .job-segments {
-            font-size: 0.85rem;
-            color: #aaa;
-        }
-        .segment {
-            padding: 0.5rem 0;
-            border-bottom: 1px solid #333;
-        }
+        .job-text { line-height: 1.6; white-space: pre-wrap; }
+        .job-segments { font-size: 0.85rem; color: #aaa; }
+        .segment { padding: 0.5rem 0; border-bottom: 1px solid #333; }
         .segment:last-child { border: none; }
         .segment-time { color: #6c63ff; margin-right: 0.5rem; }
+
+        .btn {
+            padding: 0.4rem 0.8rem;
+            background: #6c63ff;
+            border: none;
+            color: #fff;
+            cursor: pointer;
+            border-radius: 6px;
+            font-size: 0.8rem;
+        }
+        .btn:hover { background: #5a52d5; }
+        .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+        .btn-secondary { background: #444; }
+        .btn-secondary:hover { background: #555; }
+
+        .summary-block {
+            margin-top: 1rem;
+            padding: 1rem;
+            background: #1e1e3f;
+            border-radius: 8px;
+            border-left: 3px solid #6c63ff;
+        }
+        .summary-block h4 { margin-bottom: 0.5rem; color: #6c63ff; font-weight: 500; }
+        .summary-loading { color: #888; font-style: italic; }
+
+        .chat-section {
+            margin-top: 3rem;
+            padding-top: 2rem;
+            border-top: 1px solid #333;
+        }
+        .chat-section h2 { margin-bottom: 1rem; font-weight: 300; font-size: 1.3rem; }
+        .chat-input {
+            display: flex;
+            gap: 0.5rem;
+        }
+        .chat-input textarea {
+            flex: 1;
+            padding: 0.8rem;
+            background: #252540;
+            border: 1px solid #444;
+            border-radius: 8px;
+            color: #eee;
+            font-family: inherit;
+            resize: vertical;
+            min-height: 80px;
+        }
+        .chat-input textarea:focus { outline: none; border-color: #6c63ff; }
+        .chat-response {
+            margin-top: 1rem;
+            padding: 1rem;
+            background: #252540;
+            border-radius: 8px;
+            white-space: pre-wrap;
+            line-height: 1.6;
+        }
     </style>
 </head>
 <body>
@@ -106,12 +151,25 @@
         </div>
 
         <div class="results" id="results"></div>
+
+        <div class="chat-section">
+            <h2>LLM Chat</h2>
+            <div class="chat-input">
+                <textarea id="chatInput" placeholder="Введите запрос к LLM..."></textarea>
+                <button class="btn" id="chatSend" style="align-self: flex-end;">Отправить</button>
+            </div>
+            <div class="chat-response" id="chatResponse" style="display: none;"></div>
+        </div>
     </div>
 
     <script>
         const dropZone = document.getElementById('dropZone');
         const fileInput = document.getElementById('fileInput');
         const results = document.getElementById('results');
+        const chatInput = document.getElementById('chatInput');
+        const chatSend = document.getElementById('chatSend');
+        const chatResponse = document.getElementById('chatResponse');
+
         let currentView = 'text';
         const jobs = new Map();
 
@@ -127,46 +185,29 @@
 
         // Drag and drop
         dropZone.onclick = () => fileInput.click();
-
-        dropZone.ondragover = (e) => {
-            e.preventDefault();
-            dropZone.classList.add('dragover');
-        };
-
+        dropZone.ondragover = (e) => { e.preventDefault(); dropZone.classList.add('dragover'); };
         dropZone.ondragleave = () => dropZone.classList.remove('dragover');
-
         dropZone.ondrop = (e) => {
             e.preventDefault();
             dropZone.classList.remove('dragover');
             if (e.dataTransfer.files.length) uploadFile(e.dataTransfer.files[0]);
         };
-
-        fileInput.onchange = () => {
-            if (fileInput.files.length) uploadFile(fileInput.files[0]);
-        };
+        fileInput.onchange = () => { if (fileInput.files.length) uploadFile(fileInput.files[0]); };
 
         async function uploadFile(file) {
             dropZone.classList.add('uploading');
-
             const formData = new FormData();
             formData.append('file', file);
 
             try {
                 const resp = await fetch('/api/transcribe', { method: 'POST', body: formData });
                 const data = await resp.json();
-
-                jobs.set(data.job_id, {
-                    id: data.job_id,
-                    filename: file.name,
-                    status: 'pending',
-                    result: null
-                });
+                jobs.set(data.job_id, { id: data.job_id, filename: file.name, status: 'pending', result: null, summary: null });
                 renderJobs();
                 pollJob(data.job_id);
             } catch (err) {
                 alert('Ошибка: ' + err.message);
             }
-
             dropZone.classList.remove('uploading');
         }
 
@@ -175,13 +216,11 @@
                 try {
                     const resp = await fetch(`/api/jobs/${jobId}`);
                     const data = await resp.json();
-
                     const job = jobs.get(jobId);
                     job.status = data.status;
                     job.result = data.result;
                     job.error = data.error;
                     renderJobs();
-
                     if (data.status === 'pending' || data.status === 'processing') {
                         setTimeout(poll, 2000);
                     }
@@ -193,9 +232,30 @@
             poll();
         }
 
+        async function summarizeJob(jobId) {
+            const job = jobs.get(jobId);
+            if (!job.result) return;
+
+            job.summaryLoading = true;
+            renderJobs();
+
+            try {
+                const resp = await fetch('/api/summarize', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ text: job.result.text })
+                });
+                const data = await resp.json();
+                job.summary = data.summary;
+            } catch (err) {
+                job.summary = 'Ошибка: ' + err.message;
+            }
+            job.summaryLoading = false;
+            renderJobs();
+        }
+
         function renderJobs() {
             results.innerHTML = '';
-
             jobs.forEach(job => {
                 const div = document.createElement('div');
                 div.className = 'job';
@@ -203,7 +263,10 @@
                 let content = `
                     <div class="job-header">
                         <span>${job.filename}</span>
-                        <span class="job-status ${job.status}">${job.status}</span>
+                        <div class="job-actions">
+                            ${job.status === 'done' ? `<button class="btn btn-secondary" onclick="summarizeJob('${job.id}')" ${job.summaryLoading ? 'disabled' : ''}>Суммаризировать</button>` : ''}
+                            <span class="job-status ${job.status}">${job.status}</span>
+                        </div>
                     </div>
                 `;
 
@@ -213,19 +276,18 @@
                     } else {
                         content += '<div class="job-segments">';
                         job.result.segments.forEach(seg => {
-                            const start = formatTime(seg.start);
-                            const end = formatTime(seg.end);
-                            content += `
-                                <div class="segment">
-                                    <span class="segment-time">[${start} - ${end}]</span>
-                                    ${seg.text}
-                                </div>
-                            `;
+                            content += `<div class="segment"><span class="segment-time">[${formatTime(seg.start)} - ${formatTime(seg.end)}]</span>${seg.text}</div>`;
                         });
                         content += '</div>';
                     }
                 } else if (job.error) {
                     content += `<div class="job-text" style="color: #ef4444;">${job.error}</div>`;
+                }
+
+                if (job.summaryLoading) {
+                    content += `<div class="summary-block"><div class="summary-loading">Генерация summary...</div></div>`;
+                } else if (job.summary) {
+                    content += `<div class="summary-block"><h4>Summary</h4><div class="job-text">${job.summary}</div></div>`;
                 }
 
                 div.innerHTML = content;
@@ -238,6 +300,29 @@
             const s = Math.floor(seconds % 60);
             return `${m}:${s.toString().padStart(2, '0')}`;
         }
+
+        // Chat
+        chatSend.onclick = async () => {
+            const text = chatInput.value.trim();
+            if (!text) return;
+
+            chatSend.disabled = true;
+            chatResponse.style.display = 'block';
+            chatResponse.textContent = 'Думаю...';
+
+            try {
+                const resp = await fetch('/api/chat', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ messages: [{ role: 'user', content: text }] })
+                });
+                const data = await resp.json();
+                chatResponse.textContent = data.text || data.detail || 'Нет ответа';
+            } catch (err) {
+                chatResponse.textContent = 'Ошибка: ' + err.message;
+            }
+            chatSend.disabled = false;
+        };
     </script>
 </body>
 </html>

@@ -1,12 +1,25 @@
+import os
 from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
+from pydantic import BaseModel
 import httpx
 from pathlib import Path
 
 app = FastAPI(title="Gateway")
 
 ASR_URL = "http://asr-api:8001"
+LLM_URL = os.getenv("LLM_URL", "http://llm:8000")
+
+
+class ChatRequest(BaseModel):
+    messages: list[dict]
+    max_tokens: int = 2000
+
+
+class SummarizeRequest(BaseModel):
+    text: str
+    prompt: str | None = None
 
 static_dir = Path(__file__).parent / "static"
 
@@ -31,6 +44,49 @@ async def get_job(job_id: str):
         if resp.status_code == 404:
             raise HTTPException(status_code=404, detail="Job not found")
         return resp.json()
+
+
+@app.post("/api/chat")
+async def chat(req: ChatRequest):
+    async with httpx.AsyncClient(timeout=120) as client:
+        payload = {
+            "model": "local",
+            "messages": req.messages,
+            "max_tokens": req.max_tokens
+        }
+        try:
+            resp = await client.post(f"{LLM_URL}/v1/chat/completions", json=payload)
+            data = resp.json()
+            return {"text": data["choices"][0]["message"]["content"]}
+        except Exception as e:
+            raise HTTPException(status_code=503, detail=f"LLM unavailable: {e}")
+
+
+@app.post("/api/summarize")
+async def summarize(req: SummarizeRequest):
+    default_prompt = """Проанализируй транскрипт встречи и выдели:
+1. Краткое содержание (2-3 предложения)
+2. Ключевые решения
+3. Задачи и ответственные (если упоминаются)
+4. Открытые вопросы
+
+Транскрипт:
+"""
+    prompt = req.prompt or default_prompt
+    messages = [{"role": "user", "content": prompt + req.text}]
+
+    async with httpx.AsyncClient(timeout=120) as client:
+        payload = {
+            "model": "local",
+            "messages": messages,
+            "max_tokens": 2000
+        }
+        try:
+            resp = await client.post(f"{LLM_URL}/v1/chat/completions", json=payload)
+            data = resp.json()
+            return {"summary": data["choices"][0]["message"]["content"]}
+        except Exception as e:
+            raise HTTPException(status_code=503, detail=f"LLM unavailable: {e}")
 
 
 @app.get("/health")
