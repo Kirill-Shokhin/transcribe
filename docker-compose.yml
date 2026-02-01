@@ -28,7 +28,7 @@ services:
       --port 8080
       --n-gpu-layers 999
       --ctx-size 32768
-      --flash-attn
+      --flash-attn on
     deploy:
       resources:
         reservations:
