@@ -172,6 +172,49 @@
 
         let currentView = 'text';
         const jobs = new Map();
+        const summaries = JSON.parse(localStorage.getItem('summaries') || '{}');
+
+        function saveSummaries() {
+            localStorage.setItem('summaries', JSON.stringify(summaries));
+        }
+
+        async function loadJobs() {
+            try {
+                const resp = await fetch('/api/jobs');
+                const data = await resp.json();
+                jobs.clear();
+                data.forEach(job => {
+                    jobs.set(job.job_id, {
+                        id: job.job_id,
+                        filename: job.filename || 'Unknown',
+                        status: job.status,
+                        result: job.result,
+                        error: job.error,
+                        summary: summaries[job.job_id] || null
+                    });
+                });
+                renderJobs();
+                // Resume polling for incomplete jobs
+                jobs.forEach(job => {
+                    if (job.status === 'pending' || job.status === 'processing') {
+                        pollJob(job.id);
+                    }
+                });
+            } catch (e) { console.error('Load jobs error:', e); }
+        }
+
+        async function deleteJob(jobId) {
+            try {
+                await fetch(`/api/jobs/${jobId}`, { method: 'DELETE' });
+                jobs.delete(jobId);
+                delete summaries[jobId];
+                saveSummaries();
+                renderJobs();
+            } catch (e) { console.error('Delete error:', e); }
+        }
+
+        // Init
+        loadJobs();
 
         // Tabs
         document.querySelectorAll('.tab').forEach(tab => {
@@ -251,6 +294,10 @@
                 job.summary = 'Ошибка: ' + err.message;
             }
             job.summaryLoading = false;
+            if (job.summary) {
+                summaries[jobId] = job.summary;
+                saveSummaries();
+            }
             renderJobs();
         }
 
@@ -266,6 +313,7 @@
                         <div class="job-actions">
                             ${job.status === 'done' ? `<button class="btn btn-secondary" onclick="summarizeJob('${job.id}')" ${job.summaryLoading ? 'disabled' : ''}>Суммаризировать</button>` : ''}
                             <span class="job-status ${job.status}">${job.status}</span>
+                            <button class="btn btn-secondary" onclick="deleteJob('${job.id}')" title="Удалить">✕</button>
                         </div>
                     </div>
                 `;

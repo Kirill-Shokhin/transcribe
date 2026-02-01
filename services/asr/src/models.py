@@ -34,3 +34,4 @@ class JobState(BaseModel):
     status: JobStatus
     result: TranscribeResult | None = None
     error: str | None = None
+    filename: str | None = None

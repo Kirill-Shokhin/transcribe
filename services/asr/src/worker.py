@@ -7,21 +7,11 @@ from pathlib import Path
 from .config import settings
 from .service import asr_service
 from .models import JobStatus, JobState
+from . import database as db
 
 
 async def get_redis():
     return await aioredis.from_url(settings.redis_url)
-
-
-async def update_job(redis, job_id: str, status: JobStatus, result=None, error=None):
-    state = JobState(
-        job_id=job_id,
-        status=status,
-        result=result,
-        error=error
-    )
-    await redis.hset(settings.redis_jobs_key, job_id, state.model_dump_json())
-    return state
 
 
 async def send_webhook(callback_url: str, state: JobState):
@@ -32,26 +22,31 @@ async def send_webhook(callback_url: str, state: JobState):
         print(f"Webhook failed: {e}")
 
 
-async def process_job(redis, job_data: dict):
+async def process_job(job_data: dict):
     job_id = job_data["job_id"]
     audio_path = job_data["audio_path"]
     callback_url = job_data.get("callback_url")
 
-    await update_job(redis, job_id, JobStatus.processing)
+    await db.update_job(job_id, JobStatus.processing)
 
     try:
         result = await asyncio.to_thread(asr_service.transcribe, audio_path)
-        state = await update_job(redis, job_id, JobStatus.done, result=result)
+        await db.update_job(job_id, JobStatus.done, result=result.model_dump())
+        state = await db.get_job(job_id)
     except Exception as e:
-        state = await update_job(redis, job_id, JobStatus.error, error=str(e))
+        await db.update_job(job_id, JobStatus.error, error=str(e))
+        state = await db.get_job(job_id)
     finally:
         Path(audio_path).unlink(missing_ok=True)
 
-    if callback_url:
+    if callback_url and state:
         await send_webhook(callback_url, state)
 
 
 async def worker_loop():
+    print("Initializing database...")
+    await db.init_db()
+
     print("Loading models...")
     asr_service.load_models()
     print("Models loaded. Worker ready.")
@@ -62,7 +57,7 @@ async def worker_loop():
         _, job_json = await redis.brpop(settings.redis_queue_key)
         job_data = json.loads(job_json)
         print(f"Processing job: {job_data['job_id']}")
-        await process_job(redis, job_data)
+        await process_job(job_data)
 
 
 def run_worker():

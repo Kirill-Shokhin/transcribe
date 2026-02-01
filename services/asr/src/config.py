@@ -23,6 +23,7 @@ class Settings(BaseSettings):
 
     # Paths
     upload_dir: Path = Path("uploads")
+    db_path: Path = Path("data/jobs.db")
 
     # Webhook
     webhook_timeout: int = 30

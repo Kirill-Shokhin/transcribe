@@ -14,6 +14,7 @@ RUN pip install --no-cache-dir \
     redis>=5.0 \
     httpx>=0.28 \
     aiofiles>=24.1 \
+    aiosqlite>=0.20 \
     pydantic-settings>=2.7 \
     silero-vad>=5.1 \
     git+https://github.com/salute-developers/GigaAM.git

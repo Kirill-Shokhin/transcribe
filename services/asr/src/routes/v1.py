@@ -1,12 +1,12 @@
 import json
 import uuid
 import aiofiles
-from pathlib import Path
 from fastapi import APIRouter, UploadFile, File, HTTPException
 from redis import asyncio as aioredis
 
 from ..config import settings
-from ..models import TranscribeRequest, JobCreate, JobState, JobStatus
+from ..models import JobCreate, JobState
+from .. import database as db
 
 
 router = APIRouter(prefix="/v1", tags=["v1"])
@@ -29,27 +29,35 @@ async def transcribe(
         content = await file.read()
         await f.write(content)
 
+    # Save to SQLite
+    await db.create_job(job_id, file.filename)
+
+    # Push to Redis queue for worker
+    redis = await get_redis()
     job_data = {
         "job_id": job_id,
         "audio_path": str(audio_path),
         "callback_url": callback_url
     }
-
-    redis = await get_redis()
-
-    initial_state = JobState(job_id=job_id, status=JobStatus.pending)
-    await redis.hset(settings.redis_jobs_key, job_id, initial_state.model_dump_json())
     await redis.lpush(settings.redis_queue_key, json.dumps(job_data))
 
     return JobCreate(job_id=job_id)
 
 
+@router.get("/jobs", response_model=list[JobState])
+async def list_jobs():
+    return await db.get_all_jobs()
+
+
 @router.get("/jobs/{job_id}", response_model=JobState)
 async def get_job(job_id: str):
-    redis = await get_redis()
-    job_json = await redis.hget(settings.redis_jobs_key, job_id)
-
-    if not job_json:
+    job = await db.get_job(job_id)
+    if not job:
         raise HTTPException(status_code=404, detail="Job not found")
+    return job
 
-    return JobState.model_validate_json(job_json)
+
+@router.delete("/jobs/{job_id}")
+async def delete_job(job_id: str):
+    await db.delete_job(job_id)
+    return {"status": "deleted"}

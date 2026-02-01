@@ -3,7 +3,7 @@ services:
     build: ./services/gateway
     profiles: [full]
     ports:
-      - "8000:8000"
+      - "9000:8000"
     environment:
       - LLM_URL=http://llm:8080
     depends_on:
@@ -14,7 +14,7 @@ services:
     image: ghcr.io/ggml-org/llama.cpp:server-cuda
     profiles: [llm, full]
     ports:
-      - "8002:8080"
+      - "9002:8080"
     volumes:
       - llm_models:/root/.cache/llama.cpp
     command: >
@@ -52,11 +52,12 @@ services:
       dockerfile: Dockerfile.api
     profiles: [asr, full]
     ports:
-      - "8001:8001"
+      - "9001:8001"
     environment:
       - ASR_REDIS_URL=redis://redis:6379/0
     volumes:
       - asr_uploads:/app/uploads
+      - asr_data:/app/data
     depends_on:
       redis:
         condition: service_healthy
@@ -71,6 +72,7 @@ services:
     volumes:
       - gigaam_models:/root/.cache
       - asr_uploads:/app/uploads
+      - asr_data:/app/data
     deploy:
       resources:
         reservations:
@@ -87,4 +89,5 @@ volumes:
   redis_data:
   gigaam_models:
   asr_uploads:
+  asr_data:
   llm_models:

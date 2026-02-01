@@ -37,12 +37,26 @@ async def transcribe(file: UploadFile = File(...)):
         return resp.json()
 
 
+@app.get("/api/jobs")
+async def list_jobs():
+    async with httpx.AsyncClient(timeout=10) as client:
+        resp = await client.get(f"{ASR_URL}/v1/jobs")
+        return resp.json()
+
+
 @app.get("/api/jobs/{job_id}")
 async def get_job(job_id: str):
     async with httpx.AsyncClient(timeout=10) as client:
         resp = await client.get(f"{ASR_URL}/v1/jobs/{job_id}")
         if resp.status_code == 404:
             raise HTTPException(status_code=404, detail="Job not found")
+        return resp.json()
+
+
+@app.delete("/api/jobs/{job_id}")
+async def delete_job(job_id: str):
+    async with httpx.AsyncClient(timeout=10) as client:
+        resp = await client.delete(f"{ASR_URL}/v1/jobs/{job_id}")
         return resp.json()
 
 
