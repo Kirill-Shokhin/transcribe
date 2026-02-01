@@ -23,6 +23,16 @@ LLM_TEMPERATURE = float(os.getenv("LLM_TEMPERATURE", "0.3"))
 # ASR parameters
 ASR_TIMEOUT = int(os.getenv("ASR_TIMEOUT", "300"))  # upload timeout for large files
 
+# Prompts
+SUMMARY_PROMPT = os.getenv("SUMMARY_PROMPT", """Проанализируй транскрипт встречи и выдели:
+1. Краткое содержание (2-3 предложения)
+2. Ключевые решения
+3. Задачи и ответственные (если упоминаются)
+4. Открытые вопросы
+
+Транскрипт:
+""")
+
 # Track last activity for GPU services
 last_activity = {"asr-worker": 0, "llm": 0}
 gpu_services_running = {"asr-worker": False, "llm": False}
@@ -140,6 +150,12 @@ class SummarizeRequest(BaseModel):
     prompt: str | None = None
 
 
+class QARequest(BaseModel):
+    text: str
+    question: str
+    summary: str | None = None
+
+
 @app.get("/")
 async def index():
     return FileResponse(static_dir / "index.html")
@@ -215,15 +231,7 @@ async def chat(req: ChatRequest):
 @app.post("/api/summarize")
 async def summarize(req: SummarizeRequest):
     await ensure_llm()
-    default_prompt = """Проанализируй транскрипт встречи и выдели:
-1. Краткое содержание (2-3 предложения)
-2. Ключевые решения
-3. Задачи и ответственные (если упоминаются)
-4. Открытые вопросы
-
-Транскрипт:
-"""
-    prompt = req.prompt or default_prompt
+    prompt = req.prompt or SUMMARY_PROMPT
     messages = [{"role": "user", "content": prompt + req.text}]
 
     async with httpx.AsyncClient(timeout=LLM_TIMEOUT) as client:
@@ -237,6 +245,32 @@ async def summarize(req: SummarizeRequest):
             resp = await client.post(f"{LLM_URL}/v1/chat/completions", json=payload)
             data = resp.json()
             return {"summary": data["choices"][0]["message"]["content"]}
+        except Exception as e:
+            raise HTTPException(status_code=503, detail=f"LLM unavailable: {e}")
+
+
+@app.post("/api/qa")
+async def question_answer(req: QARequest):
+    await ensure_llm()
+    context = f"Транскрипт:\n{req.text}"
+    if req.summary:
+        context += f"\n\nSummary:\n{req.summary}"
+    messages = [
+        {"role": "system", "content": f"Ответь на вопрос пользователя, основываясь на следующем контексте:\n\n{context}"},
+        {"role": "user", "content": req.question}
+    ]
+
+    async with httpx.AsyncClient(timeout=LLM_TIMEOUT) as client:
+        payload = {
+            "model": "local",
+            "messages": messages,
+            "max_tokens": LLM_MAX_TOKENS,
+            "temperature": LLM_TEMPERATURE
+        }
+        try:
+            resp = await client.post(f"{LLM_URL}/v1/chat/completions", json=payload)
+            data = resp.json()
+            return {"answer": data["choices"][0]["message"]["content"]}
         except Exception as e:
             raise HTTPException(status_code=503, detail=f"LLM unavailable: {e}")
 

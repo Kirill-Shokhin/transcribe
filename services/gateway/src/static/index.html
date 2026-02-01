@@ -51,17 +51,28 @@
         .job {
             background: #252540;
             border-radius: 8px;
-            padding: 1rem;
             margin-bottom: 1rem;
+            overflow: hidden;
         }
+        .job.collapsed .job-content { display: none; }
         .job-header {
             display: flex;
             justify-content: space-between;
             align-items: center;
-            margin-bottom: 0.5rem;
+            padding: 1rem;
             font-size: 0.85rem;
             color: #888;
+            cursor: pointer;
         }
+        .job-header:hover { background: rgba(255,255,255,0.03); }
+        .job-content { padding: 0 1rem 1rem; }
+        .job-title { display: flex; align-items: center; gap: 0.5rem; }
+        .job-toggle {
+            color: #666;
+            transition: transform 0.2s;
+            font-size: 0.7rem;
+        }
+        .job.collapsed .job-toggle { transform: rotate(-90deg); }
         .job-actions { display: flex; gap: 0.5rem; align-items: center; }
         .job-status {
             padding: 0.2rem 0.5rem;
@@ -115,6 +126,31 @@
         }
         .summary-block h4 { margin-bottom: 0.5rem; color: #6c63ff; font-weight: 500; }
         .summary-loading { color: #888; font-style: italic; }
+
+        .qa-block {
+            margin-top: 1rem;
+            padding: 1rem;
+            background: #1e1e3f;
+            border-radius: 8px;
+            border-left: 3px solid #10b981;
+        }
+        .qa-block h4 { margin-bottom: 0.5rem; color: #10b981; font-weight: 500; }
+        .qa-input {
+            display: flex;
+            gap: 0.5rem;
+            margin-bottom: 0.5rem;
+        }
+        .qa-input input {
+            flex: 1;
+            padding: 0.5rem;
+            background: #252540;
+            border: 1px solid #444;
+            border-radius: 6px;
+            color: #eee;
+            font-family: inherit;
+        }
+        .qa-input input:focus { outline: none; border-color: #10b981; }
+        .qa-answer { margin-top: 0.5rem; line-height: 1.6; white-space: pre-wrap; }
 
         .chat-section {
             margin-top: 3rem;
@@ -186,10 +222,30 @@
         let currentView = 'text';
         const jobs = new Map();
         const summaries = JSON.parse(localStorage.getItem('summaries') || '{}');
+        const qaAnswers = JSON.parse(localStorage.getItem('qaAnswers') || '{}');
+        const collapsedJobs = new Set(JSON.parse(localStorage.getItem('collapsedJobs') || '[]'));
         let eventSource = null;
 
         function saveSummaries() {
             localStorage.setItem('summaries', JSON.stringify(summaries));
+        }
+
+        function saveQAAnswers() {
+            localStorage.setItem('qaAnswers', JSON.stringify(qaAnswers));
+        }
+
+        function saveCollapsed() {
+            localStorage.setItem('collapsedJobs', JSON.stringify([...collapsedJobs]));
+        }
+
+        function toggleCollapse(jobId) {
+            if (collapsedJobs.has(jobId)) {
+                collapsedJobs.delete(jobId);
+            } else {
+                collapsedJobs.add(jobId);
+            }
+            saveCollapsed();
+            renderJobs();
         }
 
         async function loadJobs() {
@@ -204,7 +260,8 @@
                         progress: job.progress || 0,
                         result: job.result,
                         error: job.error,
-                        summary: summaries[job.job_id] || null
+                        summary: summaries[job.job_id] || null,
+                        qaAnswer: qaAnswers[job.job_id] || null
                     });
                 });
                 renderJobs();
@@ -219,6 +276,10 @@
                 const updates = JSON.parse(e.data);
                 updates.forEach(job => {
                     const existing = jobs.get(job.job_id);
+                    const wasNotDone = existing?.status !== 'done';
+                    const nowDone = job.status === 'done';
+                    const hasSummary = existing?.summary || summaries[job.job_id];
+
                     jobs.set(job.job_id, {
                         id: job.job_id,
                         filename: job.filename || existing?.filename || 'Unknown',
@@ -227,8 +288,14 @@
                         result: job.result || existing?.result,
                         error: job.error,
                         summary: existing?.summary || summaries[job.job_id] || null,
-                        summaryLoading: existing?.summaryLoading
+                        summaryLoading: existing?.summaryLoading,
+                        qaAnswer: existing?.qaAnswer || qaAnswers[job.job_id] || null
                     });
+
+                    // Auto-summarize when job just finished
+                    if (wasNotDone && nowDone && !hasSummary && job.result) {
+                        summarizeJob(job.job_id);
+                    }
                 });
                 renderJobs();
             };
@@ -242,7 +309,11 @@
                 await fetch(`/api/jobs/${jobId}`, { method: 'DELETE' });
                 jobs.delete(jobId);
                 delete summaries[jobId];
+                delete qaAnswers[jobId];
+                collapsedJobs.delete(jobId);
                 saveSummaries();
+                saveQAAnswers();
+                saveCollapsed();
                 renderJobs();
             } catch (e) { console.error('Delete error:', e); }
         }
@@ -279,7 +350,7 @@
             try {
                 const resp = await fetch('/api/transcribe', { method: 'POST', body: formData });
                 const data = await resp.json();
-                jobs.set(data.job_id, { id: data.job_id, filename: file.name, status: 'pending', progress: 0, result: null, summary: null });
+                jobs.set(data.job_id, { id: data.job_id, filename: file.name, status: 'pending', progress: 0, result: null, summary: null, qaAnswer: null });
                 renderJobs();
             } catch (err) {
                 alert('Ошибка: ' + err.message);
@@ -313,11 +384,42 @@
             renderJobs();
         }
 
+        async function askQuestion(jobId) {
+            const job = jobs.get(jobId);
+            if (!job.result) return;
+
+            const input = document.getElementById(`qa-input-${jobId}`);
+            const question = input.value.trim();
+            if (!question) return;
+
+            job.qaLoading = true;
+            renderJobs();
+
+            try {
+                const resp = await fetch('/api/qa', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ text: job.result.text, question, summary: job.summary || null })
+                });
+                const data = await resp.json();
+                job.qaAnswer = { q: question, a: data.answer };
+            } catch (err) {
+                job.qaAnswer = { q: question, a: 'Ошибка: ' + err.message };
+            }
+            job.qaLoading = false;
+            if (job.qaAnswer) {
+                qaAnswers[jobId] = job.qaAnswer;
+                saveQAAnswers();
+            }
+            renderJobs();
+        }
+
         function renderJobs() {
             results.innerHTML = '';
             jobs.forEach(job => {
                 const div = document.createElement('div');
-                div.className = 'job';
+                const isCollapsed = collapsedJobs.has(job.id);
+                div.className = 'job' + (isCollapsed ? ' collapsed' : '');
 
                 let statusHtml = `<span class="job-status ${job.status}">${job.status}</span>`;
                 if (job.status === 'processing') {
@@ -328,14 +430,17 @@
                 }
 
                 let content = `
-                    <div class="job-header">
-                        <span>${job.filename}</span>
-                        <div class="job-actions">
-                            ${job.status === 'done' && !job.summary ? `<button class="btn btn-secondary" onclick="summarizeJob('${job.id}')" ${job.summaryLoading ? 'disabled' : ''}>Суммаризировать</button>` : ''}
+                    <div class="job-header" onclick="toggleCollapse('${job.id}')">
+                        <div class="job-title">
+                            <span class="job-toggle">▼</span>
+                            <span>${job.filename}</span>
+                        </div>
+                        <div class="job-actions" onclick="event.stopPropagation()">
                             ${statusHtml}
                             <button class="btn btn-secondary" onclick="deleteJob('${job.id}')" title="Удалить">✕</button>
                         </div>
                     </div>
+                    <div class="job-content">
                 `;
 
                 if (job.result) {
@@ -358,6 +463,22 @@
                     content += `<div class="summary-block"><h4>Summary</h4><div class="job-text">${job.summary}</div></div>`;
                 }
 
+                // Q&A block (only if job is done)
+                if (job.status === 'done' && job.result) {
+                    content += `
+                        <div class="qa-block">
+                            <h4>Вопрос по тексту</h4>
+                            <div class="qa-input">
+                                <input type="text" id="qa-input-${job.id}" placeholder="Задайте вопрос..." onkeydown="if(event.key==='Enter')askQuestion('${job.id}')">
+                                <button class="btn" onclick="askQuestion('${job.id}')" ${job.qaLoading ? 'disabled' : ''}>Спросить</button>
+                            </div>
+                            ${job.qaLoading ? '<div class="qa-answer" style="color: #888; font-style: italic;">Думаю...</div>' : ''}
+                            ${job.qaAnswer ? `<div class="qa-answer"><strong>В:</strong> ${job.qaAnswer.q}<br><strong>О:</strong> ${job.qaAnswer.a}</div>` : ''}
+                        </div>
+                    `;
+                }
+
+                content += '</div>';
                 div.innerHTML = content;
                 results.appendChild(div);
             });
