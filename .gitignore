@@ -7,6 +7,8 @@ GEMINI.md
 
 *.npz
 *.pt
+*.wav
+*.ogg
 
 # SQLite files
 *.db

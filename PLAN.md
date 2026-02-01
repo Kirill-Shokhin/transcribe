@@ -44,8 +44,21 @@ Response format:
 ## Phase 1: ASR Service
 
 ### Модели
-- **ASR**: GigaAM-v3 e2e_rnnt (HuggingFace: `ai-sage/GigaAM-v3`, revision: `e2e_rnnt`)
+- **ASR**: GigaAM-v3 e2e_rnnt — пакет `gigaam` напрямую (без transformers)
 - **VAD**: Silero VAD (CPU)
+
+### Установка GigaAM
+```bash
+pip install git+https://github.com/salute-developers/GigaAM.git
+```
+
+```python
+import gigaam
+model = gigaam.load_model("v3_e2e_rnnt")
+text = model.transcribe(audio_path)
+```
+
+ONNX доступен если нужна оптимизация — конвертим позже.
 
 ### VRAM
 - GigaAM: ~2GB
@@ -78,9 +91,13 @@ Response:
 `transcribe.py` содержит рабочую логику:
 - `merge_segments()` — склейка VAD сегментов в чанки до 25 сек
 - `transcribe_long()` — основной пайплайн: load → VAD → chunk → ASR
-- Загрузка моделей через `AutoModel.from_pretrained()` и `load_silero_vad()`
 
-Эту логику переносим в `service.py`.
+**Изменения для сервиса:**
+- ~~`AutoModel.from_pretrained()`~~ → `gigaam.load_model("v3_e2e_rnnt")`
+- Убираем зависимость transformers
+- `load_silero_vad()` остаётся
+
+Логику переносим в `service.py`.
 
 ### Структура ASR сервиса
 

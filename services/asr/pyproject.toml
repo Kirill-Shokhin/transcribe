@@ -1,0 +1,26 @@
+[project]
+name = "asr-service"
+version = "0.1.0"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.34",
+    "redis>=5.0",
+    "httpx>=0.28",
+    "aiofiles>=24.1",
+    "pydantic-settings>=2.7",
+    "torch>=2.5",
+    "torchaudio>=2.5",
+    "transformers>=4.47",
+    "silero-vad>=5.1",
+]
+
+[project.scripts]
+asr-api = "src.main:app"
+asr-worker = "src.worker:run_worker"
+
+[tool.uv]
+dev-dependencies = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.24",
+]
