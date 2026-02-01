@@ -1,0 +1,243 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Transcribe</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: system-ui, sans-serif;
+            background: #1a1a2e;
+            color: #eee;
+            min-height: 100vh;
+            padding: 2rem;
+        }
+        .container { max-width: 800px; margin: 0 auto; }
+        h1 { margin-bottom: 2rem; font-weight: 300; }
+
+        .drop-zone {
+            border: 2px dashed #444;
+            border-radius: 12px;
+            padding: 3rem;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.2s;
+            margin-bottom: 2rem;
+        }
+        .drop-zone:hover, .drop-zone.dragover {
+            border-color: #6c63ff;
+            background: rgba(108, 99, 255, 0.1);
+        }
+        .drop-zone.uploading {
+            opacity: 0.5;
+            pointer-events: none;
+        }
+        .drop-zone input { display: none; }
+
+        .tabs {
+            display: flex;
+            gap: 1rem;
+            margin-bottom: 1rem;
+        }
+        .tab {
+            padding: 0.5rem 1rem;
+            background: #252540;
+            border: none;
+            color: #888;
+            cursor: pointer;
+            border-radius: 6px;
+        }
+        .tab.active { background: #6c63ff; color: #fff; }
+
+        .results { margin-top: 2rem; }
+        .job {
+            background: #252540;
+            border-radius: 8px;
+            padding: 1rem;
+            margin-bottom: 1rem;
+        }
+        .job-header {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 0.5rem;
+            font-size: 0.85rem;
+            color: #888;
+        }
+        .job-status {
+            padding: 0.2rem 0.5rem;
+            border-radius: 4px;
+            font-size: 0.75rem;
+        }
+        .job-status.pending { background: #444; }
+        .job-status.processing { background: #f59e0b; color: #000; }
+        .job-status.done { background: #10b981; color: #000; }
+        .job-status.error { background: #ef4444; }
+
+        .job-text {
+            line-height: 1.6;
+            white-space: pre-wrap;
+        }
+        .job-segments {
+            font-size: 0.85rem;
+            color: #aaa;
+        }
+        .segment {
+            padding: 0.5rem 0;
+            border-bottom: 1px solid #333;
+        }
+        .segment:last-child { border: none; }
+        .segment-time { color: #6c63ff; margin-right: 0.5rem; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Transcribe</h1>
+
+        <div class="drop-zone" id="dropZone">
+            <p>Перетащите аудио или нажмите для выбора</p>
+            <p style="font-size: 0.85rem; color: #666; margin-top: 0.5rem;">ogg, mp3, wav, m4a...</p>
+            <input type="file" id="fileInput" accept="audio/*">
+        </div>
+
+        <div class="tabs">
+            <button class="tab active" data-view="text">Текст</button>
+            <button class="tab" data-view="segments">Сегменты</button>
+        </div>
+
+        <div class="results" id="results"></div>
+    </div>
+
+    <script>
+        const dropZone = document.getElementById('dropZone');
+        const fileInput = document.getElementById('fileInput');
+        const results = document.getElementById('results');
+        let currentView = 'text';
+        const jobs = new Map();
+
+        // Tabs
+        document.querySelectorAll('.tab').forEach(tab => {
+            tab.onclick = () => {
+                document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+                tab.classList.add('active');
+                currentView = tab.dataset.view;
+                renderJobs();
+            };
+        });
+
+        // Drag and drop
+        dropZone.onclick = () => fileInput.click();
+
+        dropZone.ondragover = (e) => {
+            e.preventDefault();
+            dropZone.classList.add('dragover');
+        };
+
+        dropZone.ondragleave = () => dropZone.classList.remove('dragover');
+
+        dropZone.ondrop = (e) => {
+            e.preventDefault();
+            dropZone.classList.remove('dragover');
+            if (e.dataTransfer.files.length) uploadFile(e.dataTransfer.files[0]);
+        };
+
+        fileInput.onchange = () => {
+            if (fileInput.files.length) uploadFile(fileInput.files[0]);
+        };
+
+        async function uploadFile(file) {
+            dropZone.classList.add('uploading');
+
+            const formData = new FormData();
+            formData.append('file', file);
+
+            try {
+                const resp = await fetch('/api/transcribe', { method: 'POST', body: formData });
+                const data = await resp.json();
+
+                jobs.set(data.job_id, {
+                    id: data.job_id,
+                    filename: file.name,
+                    status: 'pending',
+                    result: null
+                });
+                renderJobs();
+                pollJob(data.job_id);
+            } catch (err) {
+                alert('Ошибка: ' + err.message);
+            }
+
+            dropZone.classList.remove('uploading');
+        }
+
+        async function pollJob(jobId) {
+            const poll = async () => {
+                try {
+                    const resp = await fetch(`/api/jobs/${jobId}`);
+                    const data = await resp.json();
+
+                    const job = jobs.get(jobId);
+                    job.status = data.status;
+                    job.result = data.result;
+                    job.error = data.error;
+                    renderJobs();
+
+                    if (data.status === 'pending' || data.status === 'processing') {
+                        setTimeout(poll, 2000);
+                    }
+                } catch (err) {
+                    console.error('Poll error:', err);
+                    setTimeout(poll, 5000);
+                }
+            };
+            poll();
+        }
+
+        function renderJobs() {
+            results.innerHTML = '';
+
+            jobs.forEach(job => {
+                const div = document.createElement('div');
+                div.className = 'job';
+
+                let content = `
+                    <div class="job-header">
+                        <span>${job.filename}</span>
+                        <span class="job-status ${job.status}">${job.status}</span>
+                    </div>
+                `;
+
+                if (job.result) {
+                    if (currentView === 'text') {
+                        content += `<div class="job-text">${job.result.text}</div>`;
+                    } else {
+                        content += '<div class="job-segments">';
+                        job.result.segments.forEach(seg => {
+                            const start = formatTime(seg.start);
+                            const end = formatTime(seg.end);
+                            content += `
+                                <div class="segment">
+                                    <span class="segment-time">[${start} - ${end}]</span>
+                                    ${seg.text}
+                                </div>
+                            `;
+                        });
+                        content += '</div>';
+                    }
+                } else if (job.error) {
+                    content += `<div class="job-text" style="color: #ef4444;">${job.error}</div>`;
+                }
+
+                div.innerHTML = content;
+                results.appendChild(div);
+            });
+        }
+
+        function formatTime(seconds) {
+            const m = Math.floor(seconds / 60);
+            const s = Math.floor(seconds % 60);
+            return `${m}:${s.toString().padStart(2, '0')}`;
+        }
+    </script>
+</body>
+</html>

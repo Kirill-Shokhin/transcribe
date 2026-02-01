@@ -1,4 +1,12 @@
 services:
+  gateway:
+    build: ./services/gateway
+    profiles: [full]
+    ports:
+      - "8000:8000"
+    depends_on:
+      - asr-api
+
   redis:
     image: redis
     ports:
