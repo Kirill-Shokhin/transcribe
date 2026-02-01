@@ -45,11 +45,14 @@ class ASRService:
         chunks.append((chunk_start, chunk_end))
         return chunks
 
-    def _transcribe_chunk(self, audio: torch.Tensor, sr: int) -> str:
-        torchaudio.save(str(settings.temp_chunk_path), audio.unsqueeze(0), sr)
-        text = self.asr_model.transcribe(str(settings.temp_chunk_path))
-        settings.temp_chunk_path.unlink(missing_ok=True)
-        return text
+    def _transcribe_tensor(self, audio: torch.Tensor) -> str:
+        """Transcribe tensor directly without saving to file."""
+        wav = audio.to(self.asr_model._device).to(self.asr_model._dtype)
+        if wav.dim() == 1:
+            wav = wav.unsqueeze(0)
+        length = torch.tensor([wav.shape[-1]], device=self.asr_model._device)
+        encoded, encoded_len = self.asr_model.forward(wav, length)
+        return self.asr_model.decoding.decode(self.asr_model.head, encoded, encoded_len)[0]
 
     def transcribe(self, audio_path: str | Path) -> TranscribeResult:
         audio_path = Path(audio_path)
@@ -64,7 +67,7 @@ class ASRService:
 
         # Short audio — no segmentation
         if duration <= settings.short_audio_threshold:
-            text = self.asr_model.transcribe(str(audio_path))
+            text = self._transcribe_tensor(wav)
             return TranscribeResult(
                 text=text,
                 segments=[Segment(start=0.0, end=duration, text=text)],
@@ -90,7 +93,7 @@ class ASRService:
 
         for start, end in chunks:
             audio_chunk = wav[start:end]
-            text = self._transcribe_chunk(audio_chunk, sr)
+            text = self._transcribe_tensor(audio_chunk)
 
             segments.append(Segment(
                 start=start / sr,

@@ -23,7 +23,6 @@ class Settings(BaseSettings):
 
     # Paths
     upload_dir: Path = Path("uploads")
-    temp_chunk_path: Path = Path("_temp_chunk.wav")
 
     # Webhook
     webhook_timeout: int = 30
