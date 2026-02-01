@@ -221,6 +221,13 @@
 
         let currentView = 'text';
         const jobs = new Map();
+
+        // Supported audio formats (torchaudio + ffmpeg)
+        const AUDIO_EXTENSIONS = new Set([
+            'mp3', 'wav', 'ogg', 'flac', 'm4a', 'aac', 'wma', 'opus',
+            'webm', 'aiff', 'aif', 'au', 'amr', 'ape', 'mka', 'spx',
+            'mp4', 'mkv', 'avi', 'mov'  // video containers with audio
+        ]);
         const summaries = JSON.parse(localStorage.getItem('summaries') || '{}');
         const qaAnswers = JSON.parse(localStorage.getItem('qaAnswers') || '{}');
         const collapsedJobs = new Set(JSON.parse(localStorage.getItem('collapsedJobs') || '[]'));
@@ -342,7 +349,17 @@
         };
         fileInput.onchange = () => { [...fileInput.files].forEach(uploadFile); };
 
+        function isAudioFile(filename) {
+            const ext = filename.split('.').pop()?.toLowerCase();
+            return ext && AUDIO_EXTENSIONS.has(ext);
+        }
+
         async function uploadFile(file) {
+            if (!isAudioFile(file.name)) {
+                alert(`Формат не поддерживается: ${file.name}\n\nПоддерживаемые: mp3, wav, ogg, flac, m4a, opus...`);
+                return;
+            }
+
             dropZone.classList.add('uploading');
             const formData = new FormData();
             formData.append('file', file);

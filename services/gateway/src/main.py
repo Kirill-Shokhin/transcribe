@@ -66,7 +66,7 @@ async def wait_for_service(url: str, timeout: float = 120):
                 resp = await client.get(f"{url}/health", timeout=2)
                 if resp.status_code == 200:
                     return True
-            except:
+            except Exception:
                 pass
             await asyncio.sleep(1)
     return False
@@ -93,7 +93,7 @@ async def has_pending_jobs() -> bool:
             resp = await client.get(f"{ASR_URL}/v1/jobs")
             jobs = resp.json()
             return any(j["status"] in ("pending", "processing") for j in jobs)
-    except:
+    except Exception:
         return False
 
 

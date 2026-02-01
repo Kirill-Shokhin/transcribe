@@ -65,7 +65,10 @@ async def worker_loop():
     redis = await get_redis()
 
     while True:
-        _, job_json = await redis.brpop(settings.redis_queue_key)
+        result = await redis.brpop(settings.redis_queue_key, timeout=30)
+        if result is None:
+            continue
+        _, job_json = result
         job_data = json.loads(job_json)
         print(f"Processing job: {job_data['job_id']}")
         await process_job(job_data)
