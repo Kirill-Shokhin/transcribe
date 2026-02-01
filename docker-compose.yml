@@ -1,0 +1,50 @@
+services:
+  redis:
+    image: redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 3
+
+  asr-api:
+    build: ./services/asr
+    profiles: [asr, full]
+    ports:
+      - "8001:8001"
+    environment:
+      - ASR_REDIS_URL=redis://redis:6379/0
+    volumes:
+      - asr_uploads:/app/uploads
+    depends_on:
+      redis:
+        condition: service_healthy
+
+  asr-worker:
+    build: ./services/asr
+    profiles: [asr, full]
+    command: ["python", "-m", "src.worker"]
+    environment:
+      - ASR_REDIS_URL=redis://redis:6379/0
+    volumes:
+      - gigaam_models:/root/.cache
+      - asr_uploads:/app/uploads
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    depends_on:
+      redis:
+        condition: service_healthy
+
+volumes:
+  redis_data:
+  gigaam_models:
+  asr_uploads:

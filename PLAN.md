@@ -176,8 +176,8 @@ services:
 - [x] Создать структуру services/asr/
 - [x] Перенести логику из transcribe.py
 - [x] Вынести константы в config.py
-- [ ] Dockerfile для ASR
-- [ ] docker-compose.yml
-- [ ] Заменить transformers на gigaam
+- [x] Dockerfile для ASR
+- [x] docker-compose.yml
+- [x] Заменить transformers на gigaam
 - [ ] Тесты
 - [ ] LLM сервис (Phase 2)

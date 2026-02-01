@@ -9,8 +9,7 @@ class Settings(BaseSettings):
     redis_jobs_key: str = "asr:jobs"
 
     # Model
-    model_name: str = "ai-sage/GigaAM-v3"
-    model_revision: str = "e2e_rnnt"
+    model_type: str = "v3_e2e_rnnt"
 
     # VAD
     vad_threshold: float = 0.5

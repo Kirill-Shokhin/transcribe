@@ -1,7 +1,7 @@
 import torch
 import torchaudio
+import gigaam
 from pathlib import Path
-from transformers import AutoModel
 from silero_vad import load_silero_vad, get_speech_timestamps
 
 from .config import settings
@@ -15,11 +15,7 @@ class ASRService:
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
 
     def load_models(self):
-        self.asr_model = AutoModel.from_pretrained(
-            settings.model_name,
-            revision=settings.model_revision,
-            trust_remote_code=True,
-        )
+        self.asr_model = gigaam.load_model(settings.model_type, device=self.device)
         self.vad_model = load_silero_vad()
 
     @property
