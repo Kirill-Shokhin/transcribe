@@ -1,15 +1,124 @@
 import os
+import asyncio
+import subprocess
+import time
+from contextlib import asynccontextmanager
 from fastapi import FastAPI, UploadFile, File, HTTPException
-from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 import httpx
 from pathlib import Path
 
-app = FastAPI(title="Gateway")
-
 ASR_URL = "http://asr-api:8001"
-LLM_URL = os.getenv("LLM_URL", "http://llm:8000")
+LLM_URL = os.getenv("LLM_URL", "http://llm:8080")
+IDLE_TIMEOUT = int(os.getenv("IDLE_TIMEOUT", "300"))  # 5 min default
+COMPOSE_PROJECT = os.getenv("COMPOSE_PROJECT_NAME", "transcribe")
+
+# Track last activity for GPU services
+last_activity = {"asr-worker": 0, "llm": 0}
+gpu_services_running = {"asr-worker": False, "llm": False}
+
+
+def docker_compose(*args):
+    cmd = ["docker", "compose", "-p", COMPOSE_PROJECT] + list(args)
+    subprocess.run(cmd, capture_output=True)
+
+
+def start_service(name: str):
+    if not gpu_services_running.get(name):
+        print(f"Starting {name}...")
+        docker_compose("start", name)
+        gpu_services_running[name] = True
+
+
+def stop_service(name: str):
+    if gpu_services_running.get(name):
+        print(f"Stopping {name} (idle)...")
+        docker_compose("stop", name)
+        gpu_services_running[name] = False
+
+
+async def wait_for_service(url: str, timeout: float = 120):
+    """Wait for service to be ready"""
+    start = time.time()
+    async with httpx.AsyncClient() as client:
+        while time.time() - start < timeout:
+            try:
+                resp = await client.get(f"{url}/health", timeout=2)
+                if resp.status_code == 200:
+                    return True
+            except:
+                pass
+            await asyncio.sleep(1)
+    return False
+
+
+async def ensure_asr_worker():
+    start_service("asr-worker")
+    last_activity["asr-worker"] = time.time()
+
+
+async def ensure_llm():
+    start_service("llm")
+    last_activity["llm"] = time.time()
+    # Wait for LLM to be ready
+    ready = await wait_for_service(LLM_URL, timeout=180)
+    if not ready:
+        raise HTTPException(status_code=503, detail="LLM failed to start")
+
+
+async def has_pending_jobs() -> bool:
+    """Check if there are pending/processing jobs"""
+    try:
+        async with httpx.AsyncClient(timeout=5) as client:
+            resp = await client.get(f"{ASR_URL}/v1/jobs")
+            jobs = resp.json()
+            return any(j["status"] in ("pending", "processing") for j in jobs)
+    except:
+        return False
+
+
+async def idle_checker():
+    """Background task to stop idle GPU services"""
+    while True:
+        await asyncio.sleep(60)
+        now = time.time()
+
+        # Check asr-worker
+        if gpu_services_running.get("asr-worker"):
+            last = last_activity.get("asr-worker", 0)
+            if last > 0 and (now - last) > IDLE_TIMEOUT:
+                if not await has_pending_jobs():
+                    stop_service("asr-worker")
+
+        # Check llm
+        if gpu_services_running.get("llm"):
+            last = last_activity.get("llm", 0)
+            if last > 0 and (now - last) > IDLE_TIMEOUT:
+                stop_service("llm")
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Check initial state
+    result = subprocess.run(
+        ["docker", "compose", "-p", COMPOSE_PROJECT, "ps", "--format", "{{.Service}}:{{.State}}"],
+        capture_output=True, text=True
+    )
+    for line in result.stdout.strip().split("\n"):
+        if ":" in line:
+            svc, state = line.split(":", 1)
+            if svc in gpu_services_running:
+                gpu_services_running[svc] = "running" in state.lower()
+
+    # Start idle checker
+    task = asyncio.create_task(idle_checker())
+    yield
+    task.cancel()
+
+
+app = FastAPI(title="Gateway", lifespan=lifespan)
+static_dir = Path(__file__).parent / "static"
 
 
 class ChatRequest(BaseModel):
@@ -21,8 +130,6 @@ class SummarizeRequest(BaseModel):
     text: str
     prompt: str | None = None
 
-static_dir = Path(__file__).parent / "static"
-
 
 @app.get("/")
 async def index():
@@ -31,6 +138,7 @@ async def index():
 
 @app.post("/api/transcribe")
 async def transcribe(file: UploadFile = File(...)):
+    await ensure_asr_worker()
     async with httpx.AsyncClient(timeout=60) as client:
         files = {"file": (file.filename, await file.read(), file.content_type)}
         resp = await client.post(f"{ASR_URL}/v1/transcribe", files=files)
@@ -62,6 +170,7 @@ async def delete_job(job_id: str):
 
 @app.post("/api/chat")
 async def chat(req: ChatRequest):
+    await ensure_llm()
     async with httpx.AsyncClient(timeout=120) as client:
         payload = {
             "model": "local",
@@ -78,6 +187,7 @@ async def chat(req: ChatRequest):
 
 @app.post("/api/summarize")
 async def summarize(req: SummarizeRequest):
+    await ensure_llm()
     default_prompt = """Проанализируй транскрипт встречи и выдели:
 1. Краткое содержание (2-3 предложения)
 2. Ключевые решения
@@ -106,3 +216,12 @@ async def summarize(req: SummarizeRequest):
 @app.get("/health")
 async def health():
     return {"status": "ok"}
+
+
+@app.get("/api/gpu-status")
+async def gpu_status():
+    return {
+        "services": gpu_services_running,
+        "last_activity": {k: int(time.time() - v) if v > 0 else None for k, v in last_activity.items()},
+        "idle_timeout": IDLE_TIMEOUT
+    }

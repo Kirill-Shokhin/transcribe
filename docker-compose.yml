@@ -6,9 +6,13 @@ services:
       - "9000:8000"
     environment:
       - LLM_URL=http://llm:8080
+      - IDLE_TIMEOUT=120
+      - COMPOSE_PROJECT_NAME=transcribe
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
     depends_on:
       - asr-api
-    restart: unless-stopped
+    restart: always
 
   llm:
     image: ghcr.io/ggml-org/llama.cpp:server-cuda
@@ -31,7 +35,7 @@ services:
             - driver: nvidia
               count: 1
               capabilities: [gpu]
-    restart: unless-stopped
+    restart: "no"
 
   redis:
     image: redis
@@ -44,7 +48,7 @@ services:
       interval: 5s
       timeout: 3s
       retries: 3
-    restart: unless-stopped
+    restart: always
 
   asr-api:
     build:
@@ -61,7 +65,7 @@ services:
     depends_on:
       redis:
         condition: service_healthy
-    restart: unless-stopped
+    restart: always
 
   asr-worker:
     build: ./services/asr
@@ -83,7 +87,7 @@ services:
     depends_on:
       redis:
         condition: service_healthy
-    restart: unless-stopped
+    restart: "no"
 
 volumes:
   redis_data:
