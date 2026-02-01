@@ -44,21 +44,17 @@ Response format:
 ## Phase 1: ASR Service
 
 ### Модели
-- **ASR**: GigaAM-v3 e2e_rnnt — пакет `gigaam` напрямую (без transformers)
+- **ASR**: GigaAM-v3 e2e_rnnt (HuggingFace, потом заменим на gigaam)
 - **VAD**: Silero VAD (CPU)
 
-### Установка GigaAM
+### Конфигурация (env)
+Все параметры в `config.py`, переопределяются через `ASR_*`:
 ```bash
-pip install git+https://github.com/salute-developers/GigaAM.git
+ASR_REDIS_URL=redis://redis:6379/0
+ASR_MODEL_NAME=ai-sage/GigaAM-v3
+ASR_SHORT_AUDIO_THRESHOLD=30
+ASR_WEBHOOK_TIMEOUT=60
 ```
-
-```python
-import gigaam
-model = gigaam.load_model("v3_e2e_rnnt")
-text = model.transcribe(audio_path)
-```
-
-ONNX доступен если нужна оптимизация — конвертим позже.
 
 ### VRAM
 - GigaAM: ~2GB
@@ -177,9 +173,11 @@ services:
 
 - [x] Определить архитектуру
 - [x] Выбрать модели
-- [ ] Создать структуру services/asr/
-- [ ] Перенести логику из transcribe.py
+- [x] Создать структуру services/asr/
+- [x] Перенести логику из transcribe.py
+- [x] Вынести константы в config.py
 - [ ] Dockerfile для ASR
 - [ ] docker-compose.yml
+- [ ] Заменить transformers на gigaam
 - [ ] Тесты
 - [ ] LLM сервис (Phase 2)

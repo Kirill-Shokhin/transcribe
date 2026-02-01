@@ -11,11 +11,7 @@ from ..service import asr_service
 
 
 router = APIRouter(prefix="/v1", tags=["v1"])
-
-QUEUE_KEY = "asr:queue"
-JOBS_KEY = "asr:jobs"
-UPLOAD_DIR = Path("uploads")
-UPLOAD_DIR.mkdir(exist_ok=True)
+settings.upload_dir.mkdir(exist_ok=True)
 
 
 async def get_redis():
@@ -28,7 +24,7 @@ async def transcribe(
     callback_url: str | None = None
 ):
     job_id = str(uuid.uuid4())
-    audio_path = UPLOAD_DIR / f"{job_id}_{file.filename}"
+    audio_path = settings.upload_dir / f"{job_id}_{file.filename}"
 
     async with aiofiles.open(audio_path, "wb") as f:
         content = await file.read()
@@ -43,8 +39,8 @@ async def transcribe(
     redis = await get_redis()
 
     initial_state = JobState(job_id=job_id, status=JobStatus.pending)
-    await redis.hset(JOBS_KEY, job_id, initial_state.model_dump_json())
-    await redis.lpush(QUEUE_KEY, json.dumps(job_data))
+    await redis.hset(settings.redis_jobs_key, job_id, initial_state.model_dump_json())
+    await redis.lpush(settings.redis_queue_key, json.dumps(job_data))
 
     return JobCreate(job_id=job_id)
 
@@ -52,7 +48,7 @@ async def transcribe(
 @router.get("/jobs/{job_id}", response_model=JobState)
 async def get_job(job_id: str):
     redis = await get_redis()
-    job_json = await redis.hget(JOBS_KEY, job_id)
+    job_json = await redis.hget(settings.redis_jobs_key, job_id)
 
     if not job_json:
         raise HTTPException(status_code=404, detail="Job not found")

@@ -9,10 +9,6 @@ from .service import asr_service
 from .models import JobStatus, JobState
 
 
-QUEUE_KEY = "asr:queue"
-JOBS_KEY = "asr:jobs"
-
-
 async def get_redis():
     return await aioredis.from_url(settings.redis_url)
 
@@ -24,13 +20,13 @@ async def update_job(redis, job_id: str, status: JobStatus, result=None, error=N
         result=result,
         error=error
     )
-    await redis.hset(JOBS_KEY, job_id, state.model_dump_json())
+    await redis.hset(settings.redis_jobs_key, job_id, state.model_dump_json())
     return state
 
 
 async def send_webhook(callback_url: str, state: JobState):
     try:
-        async with httpx.AsyncClient(timeout=30) as client:
+        async with httpx.AsyncClient(timeout=settings.webhook_timeout) as client:
             await client.post(callback_url, json=state.model_dump())
     except Exception as e:
         print(f"Webhook failed: {e}")
@@ -63,7 +59,7 @@ async def worker_loop():
     redis = await get_redis()
 
     while True:
-        _, job_json = await redis.brpop(QUEUE_KEY)
+        _, job_json = await redis.brpop(settings.redis_queue_key)
         job_data = json.loads(job_json)
         print(f"Processing job: {job_data['job_id']}")
         await process_job(redis, job_data)

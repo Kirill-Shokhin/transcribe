@@ -50,10 +50,9 @@ class ASRService:
         return chunks
 
     def _transcribe_chunk(self, audio: torch.Tensor, sr: int) -> str:
-        tmp_path = Path("_temp_chunk.wav")
-        torchaudio.save(str(tmp_path), audio.unsqueeze(0), sr)
-        text = self.asr_model.transcribe(str(tmp_path))
-        tmp_path.unlink(missing_ok=True)
+        torchaudio.save(str(settings.temp_chunk_path), audio.unsqueeze(0), sr)
+        text = self.asr_model.transcribe(str(settings.temp_chunk_path))
+        settings.temp_chunk_path.unlink(missing_ok=True)
         return text
 
     def transcribe(self, audio_path: str | Path) -> TranscribeResult:
@@ -68,7 +67,7 @@ class ASRService:
         duration = wav.shape[0] / sr
 
         # Short audio — no segmentation
-        if duration <= 30:
+        if duration <= settings.short_audio_threshold:
             text = self.asr_model.transcribe(str(audio_path))
             return TranscribeResult(
                 text=text,
@@ -82,7 +81,7 @@ class ASRService:
             self.vad_model,
             sampling_rate=sr,
             max_speech_duration_s=settings.max_chunk_duration,
-            min_silence_duration_ms=300
+            min_silence_duration_ms=settings.min_silence_duration_ms
         )
 
         if not timestamps:
